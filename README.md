@@ -8,16 +8,28 @@
 - 微信开发者工具
 - npm 包管理工具
 
-如果您还没有安装 npm，请按照以下步骤进行安装：
+如果您还没有安装 npm，请选择以下任一方式进行安装：
 
+方案一：直接从官网安装
 1. 首先下载并安装 Node.js（npm会随Node.js一起安装）
    - 访问 [Node.js官网](https://nodejs.org/)
    - 下载并安装最新的LTS版本
-2. 安装完成后，打开终端输入以下命令验证安装：
+
+方案二：使用 Homebrew 安装（仅适用于 macOS）
+1. 如果还没有安装 Homebrew，请先安装：
    ```bash
-   node --version
-   npm --version
+   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
    ```
+2. 使用 Homebrew 安装 Node.js：
+   ```bash
+   brew install node
+   ```
+
+安装完成后，打开终端输入以下命令验证安装：
+```bash
+node --version
+npm --version
+```
 
 ## 快速开始
 
