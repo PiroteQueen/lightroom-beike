@@ -7,7 +7,7 @@ import { createUserMessage, createAIMessage, createMessagesFromQA } from '../typ
 
 // AI API 配置
 const AI_CONFIG = {
-    auth: "app-ZikSpKF9IS3UpYNcVqelhDPx",
+    auth: "app-R0UMTGOaigQzipg4jDmPhRr6",
     api_url: "https://x-ai.ke.com",
 };
 
@@ -473,6 +473,7 @@ function Chat() {
             let isOutputtingReasoning = false
             let outputBuffer = ''
             let outputInterval = null
+            let accumulatedReasoning = ''  // 新增：用于累加所有的思考内容
             const BUFFER_INTERVAL = 80
             const BUFFER_MESSAGE = 80
 
@@ -491,7 +492,10 @@ function Chat() {
                         const chunk = outputBuffer.slice(0, outputLength)
                         outputBuffer = outputBuffer.slice(outputLength)
 
-                        currentThoughts = [{ thought: chunk }]
+                        // 累加思考内容
+                        accumulatedReasoning += chunk
+                        currentThoughts = [{ thought: accumulatedReasoning }]
+
                         setMessages(prev => {
                             const newMessages = [...prev]
                             const lastMessage = newMessages[newMessages.length - 1]
@@ -511,6 +515,7 @@ function Chat() {
                     }
                 }, BUFFER_INTERVAL)
             }
+            console.log('auth info', `${AI_CONFIG.auth}`)
 
             const task = wx.request({
                 url: `${AI_CONFIG.api_url}/v1/chat-messages`,
@@ -549,6 +554,7 @@ function Chat() {
                         return
                     }
 
+
                     let texts
                     try {
                         if (process.env.TARO_ENV === 'weapp' && Taro.getAppBaseInfo().platform === 'devtools') {
@@ -557,6 +563,10 @@ function Chat() {
                         } else {
                             texts = arrayBufferToString(response.data)
                         }
+
+                        console.log('--------------texts', {
+                            texts
+                        })
 
 
                     } catch (decodeError) {
@@ -632,6 +642,10 @@ function Chat() {
                                         case 'agent_reasoning':
                                             if (parsedData.reasoning_content) {
                                                 let content = parsedData.reasoning_content
+                                                console.log('--------------reasoning_content', {
+                                                    content
+                                                })
+
                                                 if (!hasReasoningContent) {
                                                     content = content.replace(/^[\s\n]+/, '')
                                                     if (/[^\s\n]/.test(content)) {
