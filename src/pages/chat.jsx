@@ -467,7 +467,50 @@ function Chat() {
             let accumulatedContent = ''
             let currentThoughts = []
             let currentMessageFiles = []
-            console.log('初始化流式传输变量完成')
+            let hasMessageContent = false
+            let hasReasoningContent = false
+            let reasoningBuffer = ''
+            let isOutputtingReasoning = false
+            let outputBuffer = ''
+            let outputInterval = null
+            const BUFFER_INTERVAL = 80
+            const BUFFER_MESSAGE = 80
+
+            const startReasoningOutput = () => {
+                if (isOutputtingReasoning) return
+
+                isOutputtingReasoning = true
+                outputInterval = setInterval(() => {
+                    if (reasoningBuffer) {
+                        outputBuffer += reasoningBuffer
+                        reasoningBuffer = ''
+                    }
+
+                    if (outputBuffer) {
+                        const outputLength = Math.min(BUFFER_MESSAGE, outputBuffer.length)
+                        const chunk = outputBuffer.slice(0, outputLength)
+                        outputBuffer = outputBuffer.slice(outputLength)
+
+                        currentThoughts = [{ thought: chunk }]
+                        setMessages(prev => {
+                            const newMessages = [...prev]
+                            const lastMessage = newMessages[newMessages.length - 1]
+                            if (!lastMessage.isUser) {
+                                newMessages[newMessages.length - 1] = {
+                                    ...createAIMessage(
+                                        accumulatedContent,
+                                        conversationIdRef.current,
+                                        currentMessageFiles,
+                                        currentThoughts
+                                    ),
+                                    key: Date.now()
+                                }
+                            }
+                            return newMessages
+                        })
+                    }
+                }, BUFFER_INTERVAL)
+            }
 
             const task = wx.request({
                 url: `${AI_CONFIG.api_url}/v1/chat-messages`,
@@ -480,7 +523,6 @@ function Chat() {
                 data: requestData,
                 enableChunked: true,
                 success: (res) => {
-                    console.log('请求成功，状态码:', res.statusCode)
                     if (res.statusCode === 404) {
                         throw new Error('对话不存在，请重新开始对话')
                     }
@@ -499,157 +541,174 @@ function Chat() {
                 }
             })
 
-            // 监听数据块接收
             task.onChunkReceived(function (response) {
+
                 try {
                     if (!currentRequestRef.current) {
                         console.log('当前请求已取消')
                         return
                     }
 
-                    console.log('收到数据块:', response.data)
-                    let texts;
+                    let texts
                     try {
-                        // 判断是否为开发者工具环境
-                        if (process.env.TARO_ENV === 'weapp' && Taro.getSystemInfoSync().platform === 'devtools') {
-                            // 开发者工具使用 TextDecoder
+                        if (process.env.TARO_ENV === 'weapp' && Taro.getAppBaseInfo().platform === 'devtools') {
                             const decoder = new TextDecoder('utf-8')
                             texts = decoder.decode(response.data)
                         } else {
-                            // 真机环境使用 arrayBufferToString
                             texts = arrayBufferToString(response.data)
                         }
-                        console.log('数据解码成功，解码后的文本:', texts)
+
+
                     } catch (decodeError) {
                         console.error('数据解码失败:', decodeError)
                         return
                     }
 
                     if (!texts || typeof texts !== 'string') {
-                        console.warn('接收到无效数据:', texts)
                         return
                     }
 
-                    // 将接收到的字符串按换行符分割成数组
                     const textArray = texts.split('\n')
-                    console.log('分割后的文本数组:', textArray)
 
-                    // 处理每个文本片段
                     textArray.forEach(text => {
-                        if (!text.trim()) {
+                        // 打印接受到的每一个chunk的内容
+                        console.log('text', {
+                            text
+                        })
+
+                        if (!text.trim() || text.trim() === 'data: ping') {
                             return
                         }
 
                         if (text.startsWith('data: ')) {
+
                             try {
                                 const jsonString = text.replace(/^data:\s*/, '')
-                                // 检查是否为有效的 JSON
                                 if (jsonString.trim().startsWith('{') && jsonString.trim().endsWith('}')) {
                                     const parsedData = JSON.parse(jsonString)
-                                    console.log('解析的JSON数据:', parsedData)
 
-                                    const updateMessages = () => {
-                                        console.log('开始更新消息，事件类型:', parsedData.event)
-                                        switch (parsedData.event) {
-                                            case 'message':
-                                            case 'agent_message':
-                                                if (parsedData.answer !== undefined) {
-                                                    accumulatedContent += parsedData.answer
-                                                    console.log('累积的内容:', accumulatedContent)
+                                    // 打印接受到的每一个chunk的内容
+                                    console.log('chunk', {
+                                        类型: parsedData.event,
+                                        parsedData: parsedData
+                                    })
 
-                                                    if (parsedData.conversation_id && !conversationIdRef.current) {
-                                                        conversationIdRef.current = parsedData.conversation_id
-                                                        console.log('设置会话ID:', conversationIdRef.current)
+                                    switch (parsedData.event) {
+                                        case 'message':
+                                        case 'agent_message':
+                                            if (parsedData.answer !== undefined) {
+                                                let content = parsedData.answer
+                                                if (!hasMessageContent) {
+                                                    content = content.replace(/^[\s\n]+/, '')
+                                                    if (/[^\s\n]/.test(content)) {
+                                                        hasMessageContent = true
                                                     }
-
-                                                    setMessages(prev => {
-                                                        const newMessages = [...prev]
-                                                        const lastMessage = newMessages[newMessages.length - 1]
-                                                        if (!lastMessage.isUser) {
-                                                            newMessages[newMessages.length - 1] = {
-                                                                ...createAIMessage(
-                                                                    accumulatedContent,
-                                                                    parsedData.conversation_id,
-                                                                    currentMessageFiles,
-                                                                    currentThoughts
-                                                                ),
-                                                                key: Date.now()
-                                                            }
-                                                        }
-                                                        return newMessages
-                                                    })
                                                 }
-                                                break
+                                                accumulatedContent += content
 
-                                            case 'agent_thought':
-                                                if (parsedData.thought) {
-                                                    console.log('收到思考内容:', parsedData.thought)
-                                                    currentThoughts = [{ thought: parsedData.thought }]
-                                                    setMessages(prev => {
-                                                        const newMessages = [...prev]
-                                                        const lastMessage = newMessages[newMessages.length - 1]
-                                                        if (!lastMessage.isUser) {
-                                                            newMessages[newMessages.length - 1] = {
-                                                                ...createAIMessage(
-                                                                    accumulatedContent,
-                                                                    parsedData.conversation_id,
-                                                                    currentMessageFiles,
-                                                                    currentThoughts
-                                                                ),
-                                                                key: Date.now()
-                                                            }
-                                                        }
-                                                        return newMessages
-                                                    })
+                                                if (parsedData.conversation_id && !conversationIdRef.current) {
+                                                    conversationIdRef.current = parsedData.conversation_id
                                                 }
-                                                break
 
-                                            case 'message_end':
-                                                console.log('消息传输结束')
-                                                setIsLoading(false)
-                                                if (parsedData.conversation_id) {
-                                                    const userInfo = getStoredUserInfo()
-                                                    const userId = userInfo ? `user_${userInfo.nickName}` : `user_${Date.now()}`
-                                                    console.log('开始生成对话标题，用户ID:', userId)
-
-                                                    wx.request({
-                                                        url: `${AI_CONFIG.api_url}/v1/conversations/${parsedData.conversation_id}/name`,
-                                                        method: 'POST',
-                                                        header: {
-                                                            'Content-Type': 'application/json',
-                                                            'Authorization': `Bearer ${AI_CONFIG.auth}`,
-                                                        },
-                                                        data: {
-                                                            auto_generate: true,
-                                                            user: userId
-                                                        },
-                                                        success: (response) => {
-                                                            console.log('标题生成成功，状态码:', response.statusCode)
-                                                            console.log('标题生成响应数据:', response.data)
-                                                            if (response.data && response.data.name) {
-                                                                console.log('生成的标题为:', response.data.name)
-                                                            }
-                                                        },
-                                                        fail: (error) => {
-                                                            console.error('标题生成失败，详细错误:', error)
-                                                            Taro.showToast({
-                                                                title: '标题生成失败',
-                                                                icon: 'error',
-                                                                duration: 2000
-                                                            })
+                                                setMessages(prev => {
+                                                    const newMessages = [...prev]
+                                                    const lastMessage = newMessages[newMessages.length - 1]
+                                                    if (!lastMessage.isUser) {
+                                                        newMessages[newMessages.length - 1] = {
+                                                            ...createAIMessage(
+                                                                accumulatedContent,
+                                                                parsedData.conversation_id,
+                                                                currentMessageFiles,
+                                                                currentThoughts
+                                                            ),
+                                                            key: Date.now()
                                                         }
-                                                    })
+                                                    }
+                                                    return newMessages
+                                                })
+                                            }
+                                            break
+
+                                        case 'agent_reasoning':
+                                            if (parsedData.reasoning_content) {
+                                                let content = parsedData.reasoning_content
+                                                if (!hasReasoningContent) {
+                                                    content = content.replace(/^[\s\n]+/, '')
+                                                    if (/[^\s\n]/.test(content)) {
+                                                        hasReasoningContent = true
+                                                    }
+                                                }
+
+                                                reasoningBuffer += content
+                                                if (!isOutputtingReasoning) {
+                                                    startReasoningOutput()
+                                                }
+                                            }
+                                            break
+
+                                        case 'agent_reasoning_end':
+                                            if (reasoningBuffer) {
+                                                outputBuffer += reasoningBuffer
+                                                reasoningBuffer = ''
+                                            }
+
+                                            const waitForComplete = () => {
+                                                if (outputBuffer) {
+                                                    setTimeout(waitForComplete, BUFFER_INTERVAL)
                                                 } else {
-                                                    console.warn('未获取到 conversation_id，跳过标题生成')
+                                                    if (outputInterval) {
+                                                        clearInterval(outputInterval)
+                                                        outputInterval = null
+                                                    }
+                                                    isOutputtingReasoning = false
+                                                    hasReasoningContent = false
                                                 }
-                                                break
+                                            }
+                                            waitForComplete()
+                                            break
 
-                                            case 'error':
-                                                throw new Error(parsedData.message || '未知错误')
-                                        }
+                                        case 'message_end':
+                                            hasMessageContent = false
+                                            setIsLoading(false)
+                                            if (parsedData.conversation_id) {
+                                                const userInfo = getStoredUserInfo()
+                                                const userId = userInfo ? `user_${userInfo.nickName}` : `user_${Date.now()}`
+
+                                                wx.request({
+                                                    url: `${AI_CONFIG.api_url}/v1/conversations/${parsedData.conversation_id}/name`,
+                                                    method: 'POST',
+                                                    header: {
+                                                        'Content-Type': 'application/json',
+                                                        'Authorization': `Bearer ${AI_CONFIG.auth}`,
+                                                    },
+                                                    data: {
+                                                        auto_generate: true,
+                                                        user: userId
+                                                    },
+                                                    success: (response) => {
+                                                        console.log('标题生成成功，状态码:', response.statusCode)
+                                                        console.log('标题生成响应数据:', response.data)
+                                                        if (response.data && response.data.name) {
+                                                            console.log('生成的标题为:', response.data.name)
+                                                        }
+                                                    },
+                                                    fail: (error) => {
+                                                        console.error('标题生成失败，详细错误:', error)
+                                                        Taro.showToast({
+                                                            title: '标题生成失败',
+                                                            icon: 'error',
+                                                            duration: 2000
+                                                        })
+                                                    }
+                                                })
+                                            } else {
+                                                console.warn('未获取到 conversation_id，跳过标题生成')
+                                            }
+                                            break
+
+                                        case 'error':
+                                            throw new Error(parsedData.message || '未知错误')
                                     }
-
-                                    updateMessages()
                                 } else {
                                     console.error('无效的 JSON 格式:', jsonString)
                                 }
